@@ -45,29 +45,6 @@ const pairs = (arr) => {
     return _pairs;
 };
 
-const consume = async (promises) => {
-    var results = [];
-    for (var p of promises) {
-        try {
-            results.push({
-                status: "fulfilled",
-                data: await new Promise((resolve, reject) => {
-                    setTimeout(() => {
-                        functions.logger.info("new promise");
-                        p.then(res => resolve(res)).catch(e => reject(e));
-                    }, 1000);
-                })
-            });
-        } catch (e) {
-            results.push({
-                status: "rejected",
-                error: e
-            });
-        }
-    }
-    return results;
-};
-
 
 class TrenitaliaSession {
 	ok(response) {
@@ -182,6 +159,7 @@ class TrenitaliaSession {
             functions.logger.error(`getRoute#service(${trainNumber}) failed with ${service.status}`);
             throw `getRoute#service(${trainNumber}) failed with ${service.status}`;
         }
+        functions.logger.info(service.data);
         service = service.data[0];
         let route = await axios.get(
             MOBILE_URL + "transports/caring", {
@@ -261,62 +239,44 @@ class TrenitaliaSession {
 
     async getSeatAvailability(train, query) {
         let route = await this.getRoute(train);
-        // return (await Promise.allSettled(pairs(route.stops)
-        //     .map(pair => this.getSeatsAvailabilityBetween(
-        //         train, pair[0].location.locationId, pair[1].location.locationId
-        //     )))
-        // ).sort((r1, r2) => {
-        //     if (r1.status === "rejected") {
-        //         return 1;
-        //     }
-        //     return r1.value.solutionDepartureTime.getTime() - 
-        //         r2.value.solutionDepartureTime.getTime()
-        // }).map(res => {
-        //     if (res.status === "rejected") {
-        //         return {
-        //             from: res.value.solutionOrigin,
-        //             to: res.value.solutionDestination,
-        //             seats: null
-        //         }
-        //     }
-        //     return {
-        //         from: res.value.solutionOrigin,
-        //         to: res.value.solutionDestination,
-        //         seats: query.map(s => res.seatmap.wagons
-        //             .find(wagon => wagon.id === s.coach)
-        //             .seats
-        //             .find(seat => seat.label === s.seat)
-        //         )
-        //     }
-        // });
-        return (await consume(pairs(route.stops)
-            .map(pair => this.getSeatsAvailabilityBetween(
-                train, pair[0].location.locationId, pair[1].location.locationId
-            )))
-        ).sort((r1, r2) => {
-            if (r1.status === "rejected") {
-                return 1;
-            }
-            return r1.value.solutionDepartureTime.getTime() - 
-                r2.value.solutionDepartureTime.getTime()
-        }).map(res => {
-            if (res.status === "rejected") {
-                return {
-                    from: res.value.solutionOrigin,
-                    to: res.value.solutionDestination,
-                    seats: null
+        let segments = [];
+        for (var pair of pairs(route.stops)) {
+            try {
+                let seatmap = await this.getSeatsAvailabilityBetween(
+                    train, pair[0].location.locationId, pair[1].location.locationId);
+                if (!seatmap) {
+                    throw '';
                 }
+                segments.push({
+                    from: seatmap.solutionOrigin,
+                    to: seatmap.solutionDestination,
+                    seats: query.flatMap(s => {
+                        try {
+                            let seat = seatmap.seatmap.wagons
+                                .find(wagon => wagon.id === s.coach)
+                                .seats
+                                .find(seat => seat.label === s.seat);
+                            if (seat) return [ seat ];
+                            return [];
+                        } catch {
+                            return [];
+                        }
+                    }).map(s => { return {
+                        seat: s.label,
+                        coach: s.wagonRef,
+                        available: s.available
+                    } })
+                });
+            } catch (e) {
+                functions.logger.error(e);
+                segments.push({
+                    from: pair[0].location.name,
+                    to: pair[1].location.name,
+                    seats: null
+                })
             }
-            return {
-                from: res.value.solutionOrigin,
-                to: res.value.solutionDestination,
-                seats: query.map(s => res.seatmap.wagons
-                    .find(wagon => wagon.id === s.coach)
-                    .seats
-                    .find(seat => seat.label === s.seat)
-                )
-            }
-        });
+        }
+        return segments;
     }
 
 };

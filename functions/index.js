@@ -3,7 +3,7 @@ import isvalid from 'isvalid';
 import { TrenitaliaSession } from './api.js';
 
 
-export const seat = functions.https.onRequest(async (req, res) => {
+export const seat = functions.region('europe-west1').https.onRequest(async (req, res) => {
     var query = await isvalid(req.body, {
         'query': { 
             type: Object, 
